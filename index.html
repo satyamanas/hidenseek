@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Hide & Seek</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="/socket.io/socket.io.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+:root { --card:#141a2e; --ink:#e8ecff; --muted:#8a93b8; --accent:#00e5ff; --accent2:#8b5cff; --danger:#ff3d7f; --ok:#39ff88; --line:#2a3358; }
+* { box-sizing:border-box; }
+body { margin:0; min-height:100vh; color:var(--ink); font-family:'Trebuchet MS','Segoe UI',system-ui,sans-serif;
+  background: radial-gradient(ellipse at top, #1f1650 0%, #0a0e1a 55%, #05070d 100%);
+  padding:env(safe-area-inset-top,0px) 0 env(safe-area-inset-bottom,0px); }
+.screen { display:none; padding:20px 16px 32px; max-width:560px; margin:0 auto; }
+.screen.active { display:block; }
+h1 { font-size:2.1rem; font-weight:900; text-transform:uppercase; letter-spacing:.1em; margin:8px 0 12px;
+  background:linear-gradient(90deg,#00e5ff,#b46bff,#ff3d7f); -webkit-background-clip:text; background-clip:text; color:transparent; }
+h2 { font-size:.85rem; text-transform:uppercase; letter-spacing:.14em; color:var(--accent); text-shadow:0 0 8px rgba(0,229,255,.5); margin:4px 0 10px; }
+.muted { color:var(--muted); font-size:.9rem; }
+label { display:block; text-transform:uppercase; letter-spacing:.08em; font-size:.72rem; color:var(--muted); margin:12px 0 5px; }
+.card { background:linear-gradient(160deg, rgba(40,50,95,.55), rgba(16,21,40,.92)); border:1px solid var(--line); border-radius:18px;
+  padding:16px; margin-bottom:12px; box-shadow:0 10px 30px rgba(0,0,0,.55); }
+input { width:100%; padding:12px; font-size:1rem; color:var(--ink); background:#0c1126; border:1px solid var(--line); border-radius:12px; }
+input::placeholder { color:#5a6490; }
+input:focus { outline:none; border-color:var(--accent); box-shadow:0 0 14px rgba(0,229,255,.35); }
+.row { display:flex; gap:10px; } .row > * { flex:1; }
+button { width:100%; padding:14px; margin-top:10px; font-size:1rem; font-weight:900; text-transform:uppercase; letter-spacing:.1em;
+  color:#06101f; border:0; border-radius:14px; cursor:pointer; background:linear-gradient(90deg,#00e5ff,#8b5cff);
+  box-shadow:0 0 20px rgba(0,229,255,.35); transition:transform .08s; }
+button:active { transform:scale(.97); }
+button.secondary { background:#1a2244; color:var(--ink); box-shadow:none; border:1px solid var(--line); }
+button.danger { background:linear-gradient(90deg,#ff3d7f,#ff7a3d); color:#fff; box-shadow:0 0 20px rgba(255,61,127,.45); }
+button.small { width:auto; margin:0; padding:7px 11px; font-size:.72rem; border-radius:10px; }
+.code { font-family:'Courier New',monospace; font-size:2.8rem; font-weight:900; text-align:center; letter-spacing:.3em; color:var(--ok);
+  text-shadow:0 0 16px rgba(57,255,136,.7); padding:10px 0; }
+.player { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:10px 0; border-bottom:1px solid rgba(42,51,88,.7); }
+.player:last-child { border-bottom:0; }
+.tag { display:inline-block; padding:4px 9px; border-radius:999px; font-size:.68rem; font-weight:800; text-transform:uppercase; letter-spacing:.08em; color:#fff; }
+.seeker { background:#ff3d7f; box-shadow:0 0 10px rgba(255,61,127,.6); }
+.hider { background:#8b5cff; box-shadow:0 0 10px rgba(139,92,255,.6); }
+.found { background:#4a5277; } .gm { background:#333; }
+.timers { display:flex; gap:10px; }
+.timer { flex:1; text-align:center; padding:12px 6px; border-radius:16px; background:linear-gradient(160deg,#1a2244,#0c1126); border:1px solid var(--line); }
+.timer b { display:block; font-family:'Courier New',monospace; font-size:1.4rem; font-weight:900; color:var(--accent); text-shadow:0 0 12px rgba(0,229,255,.7); }
+.timer span { font-size:.6rem; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); }
+#map { height:52vh; min-height:320px; border:1px solid var(--accent); border-radius:18px; margin:12px 0;
+  box-shadow:0 0 30px rgba(0,229,255,.25); }
+.warn { color:var(--danger); font-weight:800; text-transform:uppercase; letter-spacing:.05em; text-shadow:0 0 10px rgba(255,61,127,.6); min-height:1.2em; }
+.gps { font-size:.8rem; color:var(--muted); margin-top:8px; }
+.nametag { background:rgba(10,14,26,.8); border:1px solid var(--accent); color:var(--ink); font-weight:700; border-radius:6px; }
+#toast { position:fixed; left:50%; bottom:24px; transform:translateX(-50%) translateY(120px); background:#141a2e; border:1px solid var(--accent);
+  box-shadow:0 0 20px rgba(0,229,255,.4); padding:12px 18px; border-radius:12px; transition:transform .3s; max-width:90%; text-align:center; z-index:999; }
+#toast.show { transform:translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+<!-- HOME -->
+<section id="home" class="screen active">
+  <h1>Hide & Seek</h1>
+  <p class="muted">Real map. Real locations. Stay inside the zone.</p>
+  <div class="card">
+    <h2>Create a game</h2>
+    <p class="muted">You're the game master. Set the rules and share the code.</p>
+    <button onclick="show('create')">Create game</button>
+  </div>
+  <div class="card">
+    <h2>Join a game</h2>
+    <p class="muted">Enter your name and the 4-letter code.</p>
+    <button class="secondary" onclick="show('join')">Join game</button>
+  </div>
+  <div class="gps" id="gpsStatus">GPS: waiting for permission...</div>
+</section>
+
+<!-- CREATE -->
+<section id="create" class="screen">
+  <h1>Create a game</h1>
+  <div class="card">
+    <label>Your name</label>
+    <input id="gmName" placeholder="Game master" maxlength="16">
+    <label>Starting zone radius (meters)</label>
+    <input id="radius" type="number" value="300" min="50" max="3000">
+    <label>Zone shrinks by (% each round)</label>
+    <input id="shrinkPct" type="number" value="20" min="5" max="60">
+    <div class="row">
+      <div><label>Location reveal (min)</label><input id="locMin" type="number" value="3" min="1" max="30"></div>
+      <div><label>Zone shrink (min)</label><input id="shrinkMin" type="number" value="10" min="1" max="60"></div>
+    </div>
+    <label>Game length (min)</label>
+    <input id="lenMin" type="number" value="45" min="10" max="180">
+    <p class="muted">The zone is centered on where you're standing right now.</p>
+  </div>
+  <button onclick="createGame()">Create game</button>
+  <button class="secondary" onclick="show('home')">Back</button>
+</section>
+
+<!-- JOIN -->
+<section id="join" class="screen">
+  <h1>Join a game</h1>
+  <div class="card">
+    <label>Your name</label>
+    <input id="joinName" placeholder="Your name" maxlength="16">
+    <label>Game code</label>
+    <input id="joinCode" placeholder="e.g. K7PX" maxlength="4" style="text-transform:uppercase;letter-spacing:.25em;text-align:center;font-size:1.4rem">
+  </div>
+  <button onclick="joinGame()">Join</button>
+  <button class="secondary" onclick="show('home')">Back</button>
+</section>
+
+<!-- LOBBY -->
+<section id="lobby" class="screen">
+  <h1>Lobby</h1>
+  <div class="card">
+    <p class="muted" style="margin:0;text-align:center">Share this code</p>
+    <div class="code" id="lobbyCode">----</div>
+  </div>
+  <div class="card">
+    <h2>Players</h2>
+    <div id="lobbyList"></div>
+    <div id="gmControls" style="display:none">
+      <button class="secondary" onclick="socket.emit('randomRoles')">Random roles</button>
+      <button onclick="startGame()">Start game</button>
+    </div>
+    <p class="muted" id="waitMsg">Waiting for the game master to start...</p>
+  </div>
+</section>
+
+<!-- GAME -->
+<section id="game" class="screen">
+  <div class="timers">
+    <div class="timer"><b id="tLoc">--:--</b><span>Next reveal</span></div>
+    <div class="timer"><b id="tShrink">--:--</b><span>Zone shrink</span></div>
+    <div class="timer"><b id="tEnd">--:--</b><span>Time left</span></div>
+  </div>
+  <div id="map"></div>
+  <div class="warn" id="warn"></div>
+  <p class="muted" id="gameHint"></p>
+  <div class="card">
+    <h2>Players</h2>
+    <div id="playerList"></div>
+  </div>
+  <button class="danger" id="endBtn" style="display:none" onclick="socket.emit('end')">End game</button>
+</section>
+
+<!-- OVER -->
+<section id="over" class="screen">
+  <h1>Game over</h1>
+  <div class="card">
+    <p id="overMsg" style="font-size:1.1rem;font-weight:700"></p>
+    <p class="muted">Found: <span id="overFound"></span></p>
+  </div>
+  <button onclick="location.reload()">Back to home</button>
+</section>
+
+<div id="toast"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const socket = io();
+let myId = null, state = null, map = null, zone = null, markers = null, fitted = false, lastPos = null;
+
+socket.on("connect", () => { myId = socket.id; });
+
+// ---------- GPS (real location, sent to server) ----------
+if (navigator.geolocation) {
+  navigator.geolocation.watchPosition(
+    p => {
+      lastPos = { lat: p.coords.latitude, lng: p.coords.longitude };
+      socket.emit("location", lastPos);
+      $("gpsStatus").textContent = `GPS: on (±${Math.round(p.coords.accuracy)} m)`;
+    },
+    err => { $("gpsStatus").textContent = "GPS error: " + err.message + ". Location is required to play."; },
+    { enableHighAccuracy: true, maximumAge: 2000, timeout: 20000 }
+  );
+} else {
+  $("gpsStatus").textContent = "This browser does not support location.";
+}
+
+// ---------- Screens ----------
+function show(id) {
+  document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
+  $(id).classList.add("active");
+  window.scrollTo(0, 0);
+}
+
+function toast(msg) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(t._h);
+  t._h = setTimeout(() => t.classList.remove("show"), 3000);
+}
+
+// ---------- Create / Join ----------
+function createGame() {
+  if (!lastPos) return toast("Waiting for GPS. Allow location and try again.");
+  socket.emit("create", {
+    name: $("gmName").value.trim(),
+    center: lastPos,
+    radius: +$("radius").value,
+    shrinkPct: +$("shrinkPct").value,
+    locMin: +$("locMin").value,
+    shrinkMin: +$("shrinkMin").value,
+    lenMin: +$("lenMin").value
+  }, res => {
+    if (!res.ok) return toast(res.error);
+    $("lobbyCode").textContent = res.code;
+    show("lobby");
+  });
+}
+
+function joinGame() {
+  const name = $("joinName").value.trim();
+  const code = $("joinCode").value.trim().toUpperCase();
+  if (!name) return toast("Enter your name.");
+  if (code.length !== 4) return toast("The code has 4 characters.");
+  socket.emit("join", { code, name }, res => {
+    if (!res.ok) return toast(res.error);
+    $("lobbyCode").textContent = res.code;
+    show("lobby");
+  });
+}
+
+function startGame() {
+  socket.emit("start", res => { if (!res.ok) toast(res.error); });
+}
+
+function setRole(id, role) { socket.emit("setRole", { id, role }); }
+function kick(id) { socket.emit("kick", id); }
+function found(id) {
+  socket.emit("found", id, res => { if (res && !res.ok) toast(res.error); });
+}
+
+// ---------- Server updates ----------
+socket.on("notice", msg => toast(msg));
+socket.on("kicked", () => { toast("You were removed from the game."); setTimeout(() => location.reload(), 1500); });
+
+socket.on("state", s => {
+  state = s;
+  if (s.phase === "lobby") {
+    show("lobby");
+    renderLobby(s);
+  } else if (s.phase === "running") {
+    if (!$("game").classList.contains("active")) show("game");
+    renderGame(s);
+  } else if (s.phase === "over") {
+    show("over");
+    $("overMsg").textContent = s.message || "Game over";
+    const found = s.players.filter(p => p.found && p.role === "hider").map(p => p.name);
+    $("overFound").textContent = found.length ? found.join(", ") : "nobody";
+  }
+});
+
+// ---------- Lobby ----------
+function renderLobby(s) {
+  const isGM = s.gmId === myId;
+  $("lobbyCode").textContent = s.code;
+  $("lobbyList").innerHTML = s.players.map(p => {
+    const tag = p.role === "gm"
+      ? `<span class="tag gm">GM</span>`
+      : `<span class="tag ${p.role}">${p.role}</span>`;
+    const ctrls = isGM && p.role !== "gm"
+      ? `<button class="small secondary" onclick="setRole('${p.id}','${p.role === "seeker" ? "hider" : "seeker"}')">Make ${p.role === "seeker" ? "hider" : "seeker"}</button>
+         <button class="small danger" onclick="kick('${p.id}')">Remove</button>`
+      : "";
+    return `<div class="player">
+      <span>${esc(p.name)}${p.connected ? "" : ' <span class="muted">(offline)</span>'}</span>
+      <span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end">${tag} ${ctrls}</span>
+    </div>`;
+  }).join("");
+  $("gmControls").style.display = isGM ? "block" : "none";
+  $("waitMsg").style.display = isGM ? "none" : "block";
+}
+
+// ---------- Game ----------
+function initMap(s) {
+  map = L.map("map", { zoomControl: true }).setView([s.center.lat, s.center.lng], 17);
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+    maxZoom: 19,
+    attribution: "&copy; OpenStreetMap &copy; CARTO"
+  }).addTo(map);
+  zone = L.circle([s.center.lat, s.center.lng], {
+    radius: s.zoneR, color: "#00e5ff", weight: 2, fillColor: "#00e5ff", fillOpacity: 0.1
+  }).addTo(map);
+  markers = L.layerGroup().addTo(map);
+}
+
+function dot(p, color) {
+  L.circleMarker([p.lat, p.lng], {
+    radius: 9, color: "#fff", weight: 2, fillColor: color, fillOpacity: 1
+  }).bindTooltip(p.name, { permanent: true, direction: "top", className: "nametag" }).addTo(markers);
+}
+
+function renderGame(s) {
+  const isGM = s.gmId === myId;
+  if (!map) {
+    initMap(s);
+    setTimeout(() => map.invalidateSize(), 150);
+  }
+  zone.setLatLng([s.center.lat, s.center.lng]).setRadius(s.zoneR);
+  if (!fitted) {
+    map.fitBounds(zone.getBounds(), { padding: [20, 20] });
+    fitted = true;
+  }
+
+  markers.clearLayers();
+  if (isGM) {
+    (s.live || []).filter(p => p.role !== "gm").forEach(p => {
+      dot(p, p.found ? "#4a5277" : p.role === "seeker" ? "#ff3d7f" : "#8b5cff");
+    });
+  } else {
+    (s.reveal || []).filter(p => p.id !== myId).forEach(p => {
+      dot(p, p.found ? "#4a5277" : p.role === "seeker" ? "#ff3d7f" : "#8b5cff");
+    });
+    if (s.me.lat != null) dot({ name: "You", lat: s.me.lat, lng: s.me.lng }, "#00e5ff");
+  }
+
+  $("tLoc").textContent = fmt(s.timers.loc);
+  $("tShrink").textContent = fmt(s.timers.shrink);
+  $("tEnd").textContent = fmt(s.timers.end);
+  $("warn").textContent = (!isGM && s.me.outside) ? "You are outside the zone!" : "";
+  $("gameHint").textContent = isGM
+    ? "You see every player live."
+    : "Hider positions update at each reveal. Seekers tag hiders within 25 m.";
+  $("endBtn").style.display = isGM ? "block" : "none";
+
+  const iAmSeeker = s.me.role === "seeker";
+  $("playerList").innerHTML = s.players.filter(p => p.role !== "gm").map(p => {
+    const canFind = p.role === "hider" && !p.found && (isGM || iAmSeeker);
+    const label = p.found ? "found" : p.role;
+    return `<div class="player">
+      <span>${esc(p.name)}</span>
+      <span style="display:flex;gap:6px;align-items:center">
+        <span class="tag ${p.found ? "found" : p.role}">${label}</span>
+        ${canFind ? `<button class="small danger" onclick="found('${p.id}')">Found</button>` : ""}
+      </span>
+    </div>`;
+  }).join("");
+}
+
+// ---------- Helpers ----------
+function fmt(sec) {
+  sec = Math.ceil(sec);
+  return String(Math.floor(sec / 60)).padStart(2, "0") + ":" + String(sec % 60).padStart(2, "0");
+}
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+</script>
+</body>
+</html>
